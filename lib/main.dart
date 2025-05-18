@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'dart:async';
+import 'database_helper.dart';
 
 void main() {
   runApp(const MyApp());
@@ -13,19 +14,19 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       theme: ThemeData(primarySwatch: Colors.blue),
-      home: const MathGame(),
+      home: const DateGame(),
     );
   }
 }
 
-class MathGame extends StatefulWidget {
-  const MathGame({super.key});
+class DateGame extends StatefulWidget {
+  const DateGame({super.key});
 
   @override
-  _MathGameState createState() => _MathGameState();
+  _DateGameState createState() => _DateGameState();
 }
 
-class _MathGameState extends State<MathGame> {
+class _DateGameState extends State<DateGame> {
   int _day = 0;
   int _month = 0;
   int _year0 = 0;
@@ -41,11 +42,14 @@ class _MathGameState extends State<MathGame> {
   double _timeTaken = 0.0;
   late DateTime _startTime;
   bool _answered = false;
+  final DatabaseHelper _dbHelper = DatabaseHelper.instance;
+  List<Map<String, dynamic>> _responseHistory = [];
 
   @override
   void initState() {
     super.initState();
     _generateProblem();
+    _loadHistory();
   }
 
   void _generateProblem() {
@@ -118,26 +122,41 @@ class _MathGameState extends State<MathGame> {
     });
   }
 
-  void _checkAnswer(int userAnswer) {
+  void _checkAnswer(int userAnswer) async {
     if (_answered) return; // Ignore additional presses
     setState(() {
       _answered = true;
       _timeTaken =
           DateTime.now().difference(_startTime).inMilliseconds / 1000.0;
       if (userAnswer == _correctAnswer) {
-        _resultText = 'Correct! Time: ${_timeTaken.toStringAsFixed(2)} seconds';
+        _resultText = 'Correct! Time: ${_timeTaken.toStringAsFixed(2)}';
       } else {
         _resultText =
-            'Incorrect! Correct answer was $_correctAnswer. Time: ${_timeTaken.toStringAsFixed(2)} seconds';
+            'Incorrect. Correct answer was $_correctAnswer. Time: ${_timeTaken.toStringAsFixed(2)}';
       }
     });
-    // Generate new problem after a short delay
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        setState(() {
-          _generateProblem();
-        });
-      }
+
+    try {
+      await _dbHelper.insertResponse({
+        'timestamp': DateTime.now().toIso8601String(),
+        'time_taken': _timeTaken,
+        'is_correct': userAnswer == _correctAnswer ? 1 : 0,
+      });
+    } catch (e) {
+      print('Error saving time: $e');
+    }
+
+    try {
+      await _dbHelper.getResponseCount();
+    } catch (e) {
+      print('Error loading history: $e');
+    }
+  }
+
+  Future<void> _loadHistory() async {
+    final history = await _dbHelper.getResponses();
+    setState(() {
+      _responseHistory = history;
     });
   }
 
@@ -175,6 +194,61 @@ class _MathGameState extends State<MathGame> {
               crossAxisSpacing: 10,
               mainAxisSpacing: 10,
               children: List.generate(7, (index) => _buildDigitButton(index)),
+            ),
+            const SizedBox(height: 20),
+            if (_answered)
+              ElevatedButton(
+                onPressed: () => setState(() => _generateProblem()),
+                child: const Text(
+                  'Next Problem',
+                  style: TextStyle(fontSize: 20),
+                ),
+              ),
+            const SizedBox(height: 20),
+            Expanded(
+              child: Column(
+                children: [
+                  const Text(
+                    'Response History',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                  Expanded(
+                    child: FutureBuilder<List<Map<String, dynamic>>>(
+                      future: _dbHelper.getResponses(),
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+                        if (snapshot.hasError) {
+                          return Center(
+                            child: Text('Error: ${snapshot.error}'),
+                          );
+                        }
+                        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                          return const Center(child: Text('No responses yet'));
+                        }
+                        final responses = snapshot.data!;
+                        return ListView.builder(
+                          itemCount: responses.length,
+                          itemBuilder: (context, index) {
+                            final response = responses[index];
+                            return ListTile(
+                              title: Text(
+                                'Time: ${response['time_taken'].toStringAsFixed(2)}s, '
+                                '${response['is_correct'] == 1 ? 'Correct' : 'Incorrect'}',
+                              ),
+                              subtitle: Text(response['timestamp']),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
