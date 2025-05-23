@@ -1,9 +1,24 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'dart:async';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'database_helper.dart';
+import 'dart:io' show Platform;
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      print('Trying to initialize for ${Platform.operatingSystem}');
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      print('sqflite_common_ffi init correct');
+    } else {
+      print('Skipping sqflite_common_ffi init');
+    }
+  } catch (e) {
+    print('Error init sqflite_common_ffi: $e');
+  }
   runApp(const MyApp());
 }
 
@@ -49,7 +64,7 @@ class _DateGameState extends State<DateGame> {
   void initState() {
     super.initState();
     _generateProblem();
-    _loadHistory();
+    _checkDatabase();
   }
 
   void _generateProblem() {
@@ -142,6 +157,7 @@ class _DateGameState extends State<DateGame> {
         'time_taken': _timeTaken,
         'is_correct': userAnswer == _correctAnswer ? 1 : 0,
       });
+      print('Response saved');
     } catch (e) {
       print('Error saving time: $e');
     }
@@ -153,11 +169,13 @@ class _DateGameState extends State<DateGame> {
     }
   }
 
-  Future<void> _loadHistory() async {
-    final history = await _dbHelper.getResponses();
-    setState(() {
-      _responseHistory = history;
-    });
+  Future<void> _checkDatabase() async {
+    try {
+      final count = await _dbHelper.getResponseCount();
+      print('Initial db check: $count responses');
+    } catch (e) {
+      print('Error checking db: $e');
+    }
   }
 
   Widget _buildDigitButton(int digit) {
